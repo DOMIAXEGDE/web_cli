@@ -215,38 +215,41 @@ EOT;
                 exit;
                 
             case 'save_text_file':
-                $targetDir = $_POST['target_dir'] ?? '';
-                $fileName = $_POST['file_name'] ?? '';
-                $fileContent = $_POST['file_content'] ?? '';
-                
-                // Validate and sanitize
-                if (empty($targetDir) || empty($fileName)) {
-                    header('Location: ?text_editor&error=missing_params');
-                    exit;
-                }
-                
-                // Sanitize directory and filename
-                $targetDir = str_replace(['..', '/', '\\'], '', $targetDir);
-                $fileName = str_replace(['..', '/', '\\'], '', $fileName);
-                
-                // Ensure filename has .txt extension
-                if (!preg_match('/\.txt$/', $fileName)) {
-                    $fileName .= '.txt';
-                }
-                
-                $dirPath = __DIR__ . '/' . $targetDir;
-                if (!file_exists($dirPath) || !is_dir($dirPath)) {
-                    header('Location: ?text_editor&error=invalid_target_dir');
-                    exit;
-                }
-                
-                $targetFile = $dirPath . '/' . $fileName;
-                if (file_put_contents($targetFile, $fileContent) !== false) {
-                    header('Location: ?text_editor&file_saved=1');
-                } else {
-                    header('Location: ?text_editor&error=save_failed');
-                }
-                exit;
+				$targetDir = $_POST['target_dir'] ?? '';
+				$fileName = $_POST['file_name'] ?? '';
+				$fileContent = $_POST['file_content'] ?? '';
+				
+				// Validate and sanitize
+				if (empty($targetDir) || empty($fileName)) {
+					header('Location: ?text_editor&error=missing_params');
+					exit;
+				}
+				
+				// Sanitize directory and filename
+				$targetDir = str_replace(['..', '/', '\\'], '', $targetDir);
+				$fileName = str_replace(['..', '/', '\\'], '', $fileName);
+				
+				// Ensure filename has .txt extension
+				if (!preg_match('/\.txt$/', $fileName)) {
+					$fileName .= '.txt';
+				}
+				
+				$dirPath = __DIR__ . '/' . $targetDir;
+				if (!file_exists($dirPath) || !is_dir($dirPath)) {
+					header('Location: ?text_editor&error=invalid_target_dir');
+					exit;
+				}
+				
+				$targetFile = $dirPath . '/' . $fileName;
+				
+				// Save file with tabs preserved (don't transform tabs to spaces)
+				if (file_put_contents($targetFile, $fileContent) !== false) {
+					header('Location: ?text_editor&file_saved=1');
+				} else {
+					header('Location: ?text_editor&error=save_failed');
+				}
+				exit;
+
                 
             case 'load_file_for_edit':
                 $filePath = $_POST['file_path'] ?? '';
@@ -1239,194 +1242,287 @@ echo <<<HTML
 HTML;
     exit;
 }
+
+	// Add this function to handle tab key in textareas
+	function add_tab_handling_script() {
+		return <<<JS
+	<script>
+		// Enable tab character in textareas
+		function enableTabInTextarea(textarea) {
+			textarea.addEventListener('keydown', function(e) {
+				if (e.key === 'Tab') {
+					e.preventDefault();
+					
+					// Get cursor position
+					const start = this.selectionStart;
+					const end = this.selectionEnd;
+					
+					// Handle selection - indent or unindent multiple lines
+					if (start !== end && this.value.substring(start, end).includes('\\n')) {
+						const selectedText = this.value.substring(start, end);
+						const lines = selectedText.split('\\n');
+						
+						// Check if we're indenting or unindenting (shift+tab)
+						if (e.shiftKey) {
+							// Unindent - remove one tab from the beginning of each line if it exists
+							const modifiedLines = lines.map(line => 
+								line.startsWith('\\t') ? line.substring(1) : line
+							);
+							const modifiedText = modifiedLines.join('\\n');
+							
+							// Insert the modified text
+							this.value = this.value.substring(0, start) + modifiedText + this.value.substring(end);
+							this.selectionStart = start;
+							this.selectionEnd = start + modifiedText.length;
+						} else {
+							// Indent - add a tab to the beginning of each line
+							const modifiedLines = lines.map(line => '\\t' + line);
+							const modifiedText = modifiedLines.join('\\n');
+							
+							// Insert the modified text
+							this.value = this.value.substring(0, start) + modifiedText + this.value.substring(end);
+							this.selectionStart = start;
+							this.selectionEnd = start + modifiedText.length;
+						}
+					} else {
+						// No selection or selection within a single line - insert a tab character
+						this.value = this.value.substring(0, start) + '\\t' + this.value.substring(end);
+						this.selectionStart = this.selectionEnd = start + 1;
+					}
+				}
+			});
+		}
+		
+		// Initialize tab handling for all code editor textareas
+		document.addEventListener('DOMContentLoaded', function() {
+			const editors = document.querySelectorAll('.editor-textarea');
+			editors.forEach(enableTabInTextarea);
+		});
+		
+		// Save tabs function - ensure tabs are preserved when saving content
+		function getEditorContentWithTabs() {
+			const editor = document.getElementById('file_content');
+			return editor.value; // Return raw value with tabs preserved
+		}
+		
+		// Override form submission to ensure tabs are preserved
+		document.addEventListener('DOMContentLoaded', function() {
+			const editorForm = document.querySelector('.editor-form form');
+			if (editorForm) {
+				editorForm.addEventListener('submit', function(e) {
+					// If we need special processing before submission, we can do it here
+					// For now, the default behavior will preserve tabs correctly
+				});
+			}
+		});
+	</script>
+	JS;
+	}
     
-    function show_text_editor() {
-        global $EDITOR_TAB_SIZE;
-        
-        $directories = get_all_directories();
-        $directory_options = '';
-        foreach ($directories as $dir) {
-            $directory_options .= "<option value=\"$dir\">$dir</option>";
-        }
-        
-        // Check if we're loading a file for editing
-        $file_content = '';
-        $file_name = '';
-        $selected_dir = '';
-        
-        if (isset($_GET['file'])) {
-            $filePath = $_GET['file'];
-            $fullPath = __DIR__ . '/' . $filePath;
-            
-            if (file_exists($fullPath) && is_file($fullPath)) {
-                $file_content = htmlspecialchars(file_get_contents($fullPath));
-                $file_name = basename($filePath);
-                $selected_dir = dirname($filePath);
-                
-                // Update the directory select options to select the current directory
-                $directory_options = '';
-                foreach ($directories as $dir) {
-                    $selected = ($dir === $selected_dir) ? 'selected' : '';
-                    $directory_options .= "<option value=\"$dir\" $selected>$dir</option>";
-                }
-            }
-        }
-        
-        // Handle success/error messages
-        $success_message = '';
-        $error_message = '';
-        
-        if (isset($_GET['file_saved'])) {
-            $success_message = '<p class="success">File saved successfully!</p>';
-        } elseif (isset($_GET['tab_size_saved'])) {
-            $success_message = '<p class="success">Tab size updated successfully!</p>';
-        } elseif (isset($_GET['error'])) {
-            $error_type = $_GET['error'];
-            switch ($error_type) {
-                case 'missing_params':
-                    $error_message = '<p class="error">Missing required parameters!</p>';
-                    break;
-                case 'invalid_target_dir':
-                    $error_message = '<p class="error">Target directory does not exist!</p>';
-                    break;
-                case 'save_failed':
-                    $error_message = '<p class="error">Failed to save file!</p>';
-                    break;
-                default:
-                    $error_message = '<p class="error">An error occurred!</p>';
-            }
-        }
-        
-        echo <<<HTML
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Text Editor</title>
-    <link rel="stylesheet" href="web-cli.css">
-    <style>
-        .editor-container {
-            max-width: 1000px;
-            margin: 20px auto;
-            padding: 20px;
-        }
-        .nav-bar {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 20px;
-        }
-        .btn {
-            padding: 10px 15px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            cursor: pointer;
-            margin-right: 5px;
-            text-decoration: none;
-        }
-        .btn-danger {
-            background-color: #f44336;
-        }
-        .editor-form {
-            margin-top: 20px;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-        }
-        .form-group select, .form-group input {
-            width: 100%;
-            padding: 8px;
-            box-sizing: border-box;
-        }
-        .editor-textarea {
-            width: 100%;
-            height: 400px;
-            padding: 10px;
-            box-sizing: border-box;
-            font-family: monospace;
-            font-size: 14px;
-            line-height: 1.5;
-            resize: vertical;
-            tab-size: $EDITOR_TAB_SIZE;
-        }
-        .success {
-            color: green;
-            font-weight: bold;
-        }
-        .error {
-            color: red;
-            font-weight: bold;
-        }
-        .settings-panel {
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }
-        .settings-form {
-            display: flex;
-            align-items: center;
-        }
-        .settings-form label {
-            margin-right: 10px;
-        }
-        .settings-form input {
-            width: 60px;
-            margin-right: 10px;
-        }
-    </style>
-</head>
-<body>
-    <div class="editor-container">
-        <div class="nav-bar">
-            <h1>Text Editor</h1>
-            <div>
-                <a href="?admin" class="btn">Dashboard</a>
-                <a href="?file_manager" class="btn">File Manager</a>
-                <a href="./" class="btn">Terminal</a>
-                <a href="?logout" class="btn btn-danger">Logout</a>
-            </div>
-        </div>
-        
-        $success_message
-        $error_message
-        
-        <div class="settings-panel">
-            <h3>Editor Settings</h3>
-            <form method="post" action="" class="settings-form">
-                <label for="tab_size">Tab Size:</label>
-                <input type="number" id="tab_size" name="tab_size" value="$EDITOR_TAB_SIZE" min="1" max="8">
-                <input type="hidden" name="save_tab_size" value="1">
-                <button type="submit" class="btn">Save Tab Size</button>
-            </form>
-        </div>
-        
-        <div class="editor-form">
-            <form method="post" action="">
-                <div class="form-group">
-                    <label for="target_dir">Directory:</label>
-                    <select id="target_dir" name="target_dir" required>
-                        $directory_options
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="file_name">File Name:</label>
-                    <input type="text" id="file_name" name="file_name" value="$file_name" required>
-                </div>
-                <div class="form-group">
-                    <label for="file_content">File Content:</label>
-                    <textarea id="file_content" name="file_content" class="editor-textarea" placeholder="Enter file content here...">$file_content</textarea>
-                </div>
-                <input type="hidden" name="action" value="save_text_file">
-                <button type="submit" class="btn">Save File</button>
-            </form>
-        </div>
-        
+	// Modify the show_text_editor function to include the tab handling script
+	function show_text_editor() {
+		global $EDITOR_TAB_SIZE;
+		
+		$directories = get_all_directories();
+		$directory_options = '';
+		foreach ($directories as $dir) {
+			$directory_options .= "<option value=\"$dir\">$dir</option>";
+		}
+		
+		// Check if we're loading a file for editing
+		$file_content = '';
+		$file_name = '';
+		$selected_dir = '';
+		
+		if (isset($_GET['file'])) {
+			$filePath = $_GET['file'];
+			$fullPath = __DIR__ . '/' . $filePath;
+			
+			if (file_exists($fullPath) && is_file($fullPath)) {
+				$file_content = htmlspecialchars(file_get_contents($fullPath), ENT_QUOTES, 'UTF-8', true);
+				$file_name = basename($filePath);
+				$selected_dir = dirname($filePath);
+				
+				// Update the directory select options to select the current directory
+				$directory_options = '';
+				foreach ($directories as $dir) {
+					$selected = ($dir === $selected_dir) ? 'selected' : '';
+					$directory_options .= "<option value=\"$dir\" $selected>$dir</option>";
+				}
+			}
+		}
+		
+		// Handle success/error messages
+		$success_message = '';
+		$error_message = '';
+		
+		if (isset($_GET['file_saved'])) {
+			$success_message = '<p class="success">File saved successfully!</p>';
+		} elseif (isset($_GET['tab_size_saved'])) {
+			$success_message = '<p class="success">Tab size updated successfully!</p>';
+		} elseif (isset($_GET['error'])) {
+			$error_type = $_GET['error'];
+			switch ($error_type) {
+				case 'missing_params':
+					$error_message = '<p class="error">Missing required parameters!</p>';
+					break;
+				case 'invalid_target_dir':
+					$error_message = '<p class="error">Target directory does not exist!</p>';
+					break;
+				case 'save_failed':
+					$error_message = '<p class="error">Failed to save file!</p>';
+					break;
+				default:
+					$error_message = '<p class="error">An error occurred!</p>';
+			}
+		}
+		
+		// Get tab handling script
+		$tab_handling_script = add_tab_handling_script();
+		
+		echo <<<HTML
+	<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<title>Text Editor</title>
+		<link rel="stylesheet" href="web-cli.css">
+		<style>
+			.editor-container {
+				max-width: 1000px;
+				margin: 20px auto;
+				padding: 20px;
+			}
+			.nav-bar {
+				display: flex;
+				justify-content: space-between;
+				margin-bottom: 20px;
+			}
+			.btn {
+				padding: 10px 15px;
+				background-color: #4CAF50;
+				color: white;
+				border: none;
+				cursor: pointer;
+				margin-right: 5px;
+				text-decoration: none;
+			}
+			.btn-danger {
+				background-color: #f44336;
+			}
+			.editor-form {
+				margin-top: 20px;
+			}
+			.form-group {
+				margin-bottom: 15px;
+			}
+			.form-group label {
+				display: block;
+				margin-bottom: 5px;
+			}
+			.form-group select, .form-group input {
+				width: 100%;
+				padding: 8px;
+				box-sizing: border-box;
+			}
+			.editor-textarea {
+				width: 100%;
+				height: 400px;
+				padding: 10px;
+				box-sizing: border-box;
+				font-family: monospace;
+				font-size: 14px;
+				line-height: 1.5;
+				resize: vertical;
+				tab-size: $EDITOR_TAB_SIZE;
+				-moz-tab-size: $EDITOR_TAB_SIZE;
+				-o-tab-size: $EDITOR_TAB_SIZE;
+				white-space: pre;
+				overflow-wrap: normal;
+				overflow-x: auto;
+			}
+			.success {
+				color: green;
+				font-weight: bold;
+			}
+			.error {
+				color: red;
+				font-weight: bold;
+			}
+			.settings-panel {
+				margin-top: 20px;
+				padding: 15px;
+				border: 1px solid #ddd;
+				border-radius: 5px;
+				margin-bottom: 20px;
+			}
+			.settings-form {
+				display: flex;
+				align-items: center;
+			}
+			.settings-form label {
+				margin-right: 10px;
+			}
+			.settings-form input {
+				width: 60px;
+				margin-right: 10px;
+			}
+			.tab-info {
+				margin-top: 10px;
+				font-size: 12px;
+				color: #666;
+			}
+		</style>
+		$tab_handling_script
+	</head>
+	<body>
+		<div class="editor-container">
+			<div class="nav-bar">
+				<h1>Text Editor</h1>
+				<div>
+					<a href="?admin" class="btn">Dashboard</a>
+					<a href="?file_manager" class="btn">File Manager</a>
+					<a href="./" class="btn">Terminal</a>
+					<a href="?logout" class="btn btn-danger">Logout</a>
+				</div>
+			</div>
+			
+			$success_message
+			$error_message
+			
+			<div class="settings-panel">
+				<h3>Editor Settings</h3>
+				<form method="post" action="" class="settings-form">
+					<label for="tab_size">Tab Size:</label>
+					<input type="number" id="tab_size" name="tab_size" value="$EDITOR_TAB_SIZE" min="1" max="8">
+					<input type="hidden" name="save_tab_size" value="1">
+					<button type="submit" class="btn">Save Tab Size</button>
+				</form>
+				<div class="tab-info">
+					<p>Use Tab key to insert tabs. Use Shift+Tab to unindent. Current tab size: $EDITOR_TAB_SIZE spaces.</p>
+				</div>
+			</div>
+			
+			<div class="editor-form">
+				<form method="post" action="">
+					<div class="form-group">
+						<label for="target_dir">Directory:</label>
+						<select id="target_dir" name="target_dir" required>
+							$directory_options
+						</select>
+					</div>
+					<div class="form-group">
+						<label for="file_name">File Name:</label>
+						<input type="text" id="file_name" name="file_name" value="$file_name" required>
+					</div>
+					<div class="form-group">
+						<label for="file_content">File Content:</label>
+						<textarea id="file_content" name="file_content" class="editor-textarea" placeholder="Enter file content here...">$file_content</textarea>
+					</div>
+					<input type="hidden" name="action" value="save_text_file">
+					<button type="submit" class="btn">Save File</button>
+				</form>
+			</div>
         <script>
 			// Load directory files
 			function loadDirectoryFiles(directory) {
