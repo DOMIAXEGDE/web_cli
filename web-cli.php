@@ -126,7 +126,7 @@ EOT;
         exit;
     }
     
-    // CRUD operations for listings
+    // CRUD operations for listings and File Manager actions
     if (isset($_POST['action']) && is_admin_authenticated()) {
         $action = $_POST['action'];
         
@@ -275,6 +275,38 @@ EOT;
                     'content' => $content,
                     'file_name' => basename($filePath)
                 ]);
+                exit;
+
+            case 'load_directory_files':
+                $directory = $_POST['directory'] ?? '';
+                $directory = str_replace(['..', '/', '\\'], '', $directory);
+                $absDir = __DIR__ . '/' . $directory;
+                if ($directory === '' || !is_dir($absDir)) {
+                    header('Content-Type: application/json');
+                    echo json_encode([]);
+                    exit;
+                }
+                $files = get_directory_files($directory);
+                header('Content-Type: application/json');
+                echo json_encode($files);
+                exit;
+
+            case 'delete_file':
+                $relPath = $_POST['path'] ?? '';
+                $relPath = str_replace(['..', '\\', "\0"], '', $relPath);
+                $absPath = __DIR__ . '/' . $relPath;
+                if (!is_file($absPath) || !file_exists($absPath)) {
+                    header('Content-Type: text/plain');
+                    echo 'ERROR: File not found';
+                    exit;
+                }
+                if (unlink($absPath)) {
+                    header('Content-Type: text/plain');
+                    echo 'File deleted';
+                } else {
+                    header('Content-Type: text/plain');
+                    echo 'ERROR: Unable to delete file';
+                }
                 exit;
         }
     }
@@ -1606,38 +1638,6 @@ HTML;
         exit;
     }
     
-/* ───────────────────────────────────────────────────────────
-    11.    AJAX endpoints for directory & file operations
-   ──────────────────────────────────────────────────────────*/
-    if (isset($_POST['action']) && $_POST['action'] === 'load_directory_files' && is_admin_authenticated()) {
-        $directory = $_POST['directory'] ?? '';
-        
-        // Sanitize directory name
-        $directory = str_replace(['..', '/', '\\'], '', $directory);
-        
-        $files = get_directory_files($directory);
-        header('Content-Type: application/json');
-        echo json_encode($files);
-        exit;
-    }
-
-	if (isset($_POST['action']) && $_POST['action'] === 'delete_file' && is_admin_authenticated()) {
-		$relPath = $_POST['path'] ?? '';
-		// basic sanitisation -- keeps everything inside the script folder
-		$relPath = str_replace(['..', '\\', "\0"], '', $relPath);
-		$absPath = __DIR__ . '/' . $relPath;
-
-		if (!is_file($absPath) || !file_exists($absPath)) {
-			echo 'ERROR: File not found';
-			exit;
-		}
-		if (unlink($absPath)) {
-			echo 'File deleted';
-		} else {
-			echo 'ERROR: Unable to delete file';
-		}
-		exit;
-	}
 ?>
 <!DOCTYPE html>
 <html lang="en">
